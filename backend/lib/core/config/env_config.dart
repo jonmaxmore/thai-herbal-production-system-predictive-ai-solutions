@@ -20,6 +20,13 @@ class EnvConfig {
   final bool enableVideoProcessing;
   final bool isProduction;
   final String environment;
+  final String neo4jUri;
+  final String neo4jUsername;
+  final String neo4jPassword;
+  final String neo4jDatabase;
+  final int neo4jPoolSize;
+  final int neo4jTimeout;
+  final bool neo4jEncrypted;
 
   EnvConfig._({
     required this.port,
@@ -222,4 +229,30 @@ class ConfigValidationException implements Exception {
   
   @override
   String toString() => 'ConfigValidationException: $message\nErrors:\n${errors.join('\n')}';
+}
+  
+    // Neo4j parameters
+    required this.neo4jUri,
+    required this.neo4jUsername,
+    required this.neo4jPassword,
+    this.neo4jDatabase = 'neo4j',
+    this.neo4jPoolSize = 10,
+    this.neo4jTimeout = 30,
+    this.neo4jEncrypted = true,
+  });
+
+  factory EnvConfig.fromEnv(DotEnv env) {
+    return EnvConfig._(
+      // ... existing assignments ...
+
+      // Neo4j assignments
+      neo4jUri: env['NEO4J_URI'] ?? 'neo4j://localhost:7687',
+      neo4jUsername: env['NEO4J_USER'] ?? 'neo4j',
+      neo4jPassword: env['NEO4J_PASSWORD'] ?? 'password',
+      neo4jDatabase: env['NEO4J_DATABASE'] ?? 'neo4j',
+      neo4jPoolSize: int.tryParse(env['NEO4J_POOL_SIZE'] ?? '10') ?? 10,
+      neo4jTimeout: int.tryParse(env['NEO4J_TIMEOUT'] ?? '30') ?? 30,
+      neo4jEncrypted: env['NEO4J_ENCRYPTED'] != 'false',
+    );
+  }
 }
