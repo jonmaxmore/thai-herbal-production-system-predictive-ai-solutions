@@ -36,31 +36,75 @@ class PostgresRepository {
     return await _connection.execute(sql, substitutionValues: parameters);
   }
 
-  Future<int> insertCertificationApplication(Map<String, dynamic> application) async {
+  Future<int> insertCertification(CertificationApplication app) async {
     final result = await _connection.execute('''
-      INSERT INTO certification_applications (
-        id, farmer_id, status, submitted_at, images
+      INSERT INTO certifications (
+        id, farmer_id, status, submitted_at, herb_ids, images, 
+        meeting_date, inspection_date, lab_results, certificate_url
       ) VALUES (
-        @id, @farmer_id, @status, @submitted_at, @images
+        @id, @farmerId, @status, @submittedAt, @herbIds, @images,
+        @meetingDate, @inspectionDate, @labResults, @certificateUrl
       )
-    ''', application);
+    ''', {
+      'id': app.id,
+      'farmerId': app.farmerId,
+      'status': app.status.toString(),
+      'submittedAt': DateTime.now(),
+      'herbIds': app.herbIds.join(','),
+      'images': app.images.join(','),
+      'meetingDate': app.remoteMeetingDate,
+      'inspectionDate': app.inspectionDate,
+      'labResults': app.labResults?.toJson(),
+      'certificateUrl': app.certificateUrl,
+    });
     
     return result;
   }
 
-  Future<Map<String, dynamic>?> getCertificationById(String id) async {
+  Future<CertificationApplication?> getCertificationById(String id) async {
     final results = await query(
-      'SELECT * FROM certification_applications WHERE id = @id',
+      'SELECT * FROM certifications WHERE id = @id',
       {'id': id},
     );
     
-    return results.isNotEmpty ? results.first : null;
+    if (results.isEmpty) return null;
+    
+    final data = results.first;
+    return CertificationApplication(
+      id: data['id'],
+      farmerId: data['farmer_id'],
+      status: CertificationStatus.values.firstWhere(
+        (e) => e.toString() == data['status']
+      ),
+      herbIds: (data['herb_ids'] as String).split(','),
+      images: (data['images'] as String).split(','),
+      remoteMeetingDate: data['meeting_date'],
+      inspectionDate: data['inspection_date'],
+      labResults: data['lab_results'] != null 
+          ? LabResult.fromJson(data['lab_results'] as Map<String, dynamic>)
+          : null,
+      certificateUrl: data['certificate_url'],
+    );
   }
 
-  Future<void> updateCertificationStatus(String id, String status) async {
+  Future<void> updateCertificationStatus(String id, CertificationStatus status) async {
     await execute(
-      'UPDATE certification_applications SET status = @status WHERE id = @id',
-      {'id': id, 'status': status},
+      'UPDATE certifications SET status = @status WHERE id = @id',
+      {'id': id, 'status': status.toString()},
+    );
+  }
+
+  Future<void> scheduleInspection(String id, DateTime date) async {
+    await execute(
+      'UPDATE certifications SET inspection_date = @date WHERE id = @id',
+      {'id': id, 'date': date},
+    );
+  }
+
+  Future<void> uploadLabResults(String id, LabResult results) async {
+    await execute(
+      'UPDATE certifications SET lab_results = @results WHERE id = @id',
+      {'id': id, 'results': results.toJson()},
     );
   }
 }
