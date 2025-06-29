@@ -1,110 +1,102 @@
-import 'package:postgres/postgres.dart';
+import 'package:neo4j_dart/neo4j_dart.dart';
 import 'package:backend/core/config/env_config.dart';
+import 'package:backend/features/certification/domain/entities/certification_application.dart';
 
-class PostgresRepository {
-  late final PostgreSQLConnection _connection;
+class Neo4jRepository {
+  late final Driver _driver;
 
-  PostgresRepository(EnvConfig config) {
-    _connection = PostgreSQLConnection(
-      config.postgresHost,
-      config.postgresPort,
-      config.postgresDatabase,
-      username: config.postgresUsername,
-      password: config.postgresPassword,
-      useSSL: config.postgresUseSsl,
-      timeoutInSeconds: config.postgresTimeout,
+  Neo4jRepository(EnvConfig config) {
+    _driver = Driver(
+      Uri.parse(config.neo4jUri),
+      AuthToken.basic(config.neo4jUsername, config.neo4jPassword),
     );
   }
 
-  Future<void> open() async {
-    await _connection.open();
+  Future<void> createCertificationTrace(CertificationApplication app) async {
+    final session = _driver.session();
+    try {
+      await session.writeTransaction((tx) async {
+        await tx.run('''
+          MERGE (farmer:Farmer {id: $farmerId, name: $farmerName})
+          CREATE (cert:Certification {
+            id: $certificationId,
+            createdAt: datetime(),
+            status: $status,
+            standard: "GACP"
+          })
+          CREATE (farmer)-[:HAS_CERTIFICATION]->(cert)
+          
+          WITH cert
+          UNWIND $herbIds AS herbId
+          MERGE (herb:Herb {id: herbId})
+          CREATE (cert)-[:CERTIFIES]->(herb)
+        ''', {
+          'farmerId': app.farmerId,
+          'farmerName': app.farmerName,
+          'certificationId': app.id,
+          'status': app.status.name,
+          'herbIds': app.herbIds,
+        });
+      });
+    } finally {
+      await session.close();
+    }
   }
 
-  Future<void> close() async {
-    await _connection.close();
+  Future<void> addCertificationEvent({
+    required String certificationId,
+    required String eventType,
+    required String description,
+    required String actor,
+  }) async {
+    final session = _driver.session();
+    try {
+      await session.writeTransaction((tx) async {
+        await tx.run('''
+          MATCH (cert:Certification {id: $certificationId})
+          CREATE (event:Event {
+            timestamp: datetime(),
+            type: $eventType,
+            description: $description,
+            actor: $actor
+          })
+          CREATE (cert)-[:HAS_EVENT]->(event)
+        ''', {
+          'certificationId': certificationId,
+          'eventType': eventType,
+          'description': description,
+          'actor': actor,
+        });
+      });
+    } finally {
+      await session.close();
+    }
   }
 
-  Future<List<Map<String, dynamic>>> query(
-    String sql, [
-    Map<String, dynamic>? parameters,
-  ]) async {
-    final result = await _connection.query(sql, substitutionValues: parameters);
-    return result.map((row) => row.toColumnMap()).toList();
+  Future<List<Map<String, dynamic>>> getCertificationTimeline(String certificationId) async {
+    final session = _driver.session();
+    try {
+      final result = await session.readTransaction((tx) async {
+        return await tx.run('''
+          MATCH (cert:Certification {id: $certificationId})-[:HAS_EVENT]->(event:Event)
+          RETURN event
+          ORDER BY event.timestamp DESC
+        ''', {'certificationId': certificationId});
+      });
+
+      return result.records.map((record) {
+        final event = record['event'];
+        return {
+          'timestamp': event['timestamp'],
+          'type': event['type'],
+          'description': event['description'],
+          'actor': event['actor'],
+        };
+      }).toList();
+    } finally {
+      await session.close();
+    }
   }
 
-  Future<int> execute(String sql, [Map<String, dynamic>? parameters]) async {
-    return await _connection.execute(sql, substitutionValues: parameters);
-  }
-
-  Future<int> insertCertification(CertificationApplication app) async {
-    final result = await _connection.execute('''
-      INSERT INTO certifications (
-        id, farmer_id, status, submitted_at, herb_ids, images, 
-        meeting_date, inspection_date, lab_results, certificate_url
-      ) VALUES (
-        @id, @farmerId, @status, @submittedAt, @herbIds, @images,
-        @meetingDate, @inspectionDate, @labResults, @certificateUrl
-      )
-    ''', {
-      'id': app.id,
-      'farmerId': app.farmerId,
-      'status': app.status.toString(),
-      'submittedAt': DateTime.now(),
-      'herbIds': app.herbIds.join(','),
-      'images': app.images.join(','),
-      'meetingDate': app.remoteMeetingDate,
-      'inspectionDate': app.inspectionDate,
-      'labResults': app.labResults?.toJson(),
-      'certificateUrl': app.certificateUrl,
-    });
-    
-    return result;
-  }
-
-  Future<CertificationApplication?> getCertificationById(String id) async {
-    final results = await query(
-      'SELECT * FROM certifications WHERE id = @id',
-      {'id': id},
-    );
-    
-    if (results.isEmpty) return null;
-    
-    final data = results.first;
-    return CertificationApplication(
-      id: data['id'],
-      farmerId: data['farmer_id'],
-      status: CertificationStatus.values.firstWhere(
-        (e) => e.toString() == data['status']
-      ),
-      herbIds: (data['herb_ids'] as String).split(','),
-      images: (data['images'] as String).split(','),
-      remoteMeetingDate: data['meeting_date'],
-      inspectionDate: data['inspection_date'],
-      labResults: data['lab_results'] != null 
-          ? LabResult.fromJson(data['lab_results'] as Map<String, dynamic>)
-          : null,
-      certificateUrl: data['certificate_url'],
-    );
-  }
-
-  Future<void> updateCertificationStatus(String id, CertificationStatus status) async {
-    await execute(
-      'UPDATE certifications SET status = @status WHERE id = @id',
-      {'id': id, 'status': status.toString()},
-    );
-  }
-
-  Future<void> scheduleInspection(String id, DateTime date) async {
-    await execute(
-      'UPDATE certifications SET inspection_date = @date WHERE id = @id',
-      {'id': id, 'date': date},
-    );
-  }
-
-  Future<void> uploadLabResults(String id, LabResult results) async {
-    await execute(
-      'UPDATE certifications SET lab_results = @results WHERE id = @id',
-      {'id': id, 'results': results.toJson()},
-    );
-  }
+  Future<void> close() async => await _driver.close();
 }
