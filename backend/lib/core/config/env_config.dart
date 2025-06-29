@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:dotenv/dotenv.dart';
 import 'package:path/path.dart' as path;
@@ -20,6 +19,7 @@ class EnvConfig {
   final bool enableVideoProcessing;
   final bool isProduction;
   final String environment;
+  // Neo4j configuration
   final String neo4jUri;
   final String neo4jUsername;
   final String neo4jPassword;
@@ -27,6 +27,16 @@ class EnvConfig {
   final int neo4jPoolSize;
   final int neo4jTimeout;
   final bool neo4jEncrypted;
+  // PostgreSQL configuration
+  final String postgresHost;
+  final int postgresPort;
+  final String postgresDatabase;
+  final String postgresUsername;
+  final String postgresPassword;
+  final bool postgresUseSsl;
+  final int postgresTimeout;
+  final int postgresQueryTimeout;
+  final int postgresPoolSize;
 
   EnvConfig._({
     required this.port,
@@ -43,6 +53,24 @@ class EnvConfig {
     required this.enableVideoProcessing,
     required this.isProduction,
     required this.environment,
+    // Neo4j parameters
+    required this.neo4jUri,
+    required this.neo4jUsername,
+    required this.neo4jPassword,
+    this.neo4jDatabase = 'neo4j',
+    this.neo4jPoolSize = 10,
+    this.neo4jTimeout = 30,
+    this.neo4jEncrypted = true,
+    // PostgreSQL parameters
+    required this.postgresHost,
+    required this.postgresPort,
+    required this.postgresDatabase,
+    required this.postgresUsername,
+    required this.postgresPassword,
+    this.postgresUseSsl = false,
+    this.postgresTimeout = 30,
+    this.postgresQueryTimeout = 15,
+    this.postgresPoolSize = 10,
   });
 
   factory EnvConfig.fromEnv(DotEnv env) {
@@ -66,6 +94,24 @@ class EnvConfig {
       enableVideoProcessing: env['ENABLE_VIDEO_PROCESSING'] == 'true',
       isProduction: isProduction,
       environment: environment,
+      // Neo4j assignments
+      neo4jUri: env['NEO4J_URI'] ?? 'neo4j://localhost:7687',
+      neo4jUsername: env['NEO4J_USER'] ?? 'neo4j',
+      neo4jPassword: env['NEO4J_PASSWORD'] ?? 'password',
+      neo4jDatabase: env['NEO4J_DATABASE'] ?? 'neo4j',
+      neo4jPoolSize: int.tryParse(env['NEO4J_POOL_SIZE'] ?? '10') ?? 10,
+      neo4jTimeout: int.tryParse(env['NEO4J_TIMEOUT'] ?? '30') ?? 30,
+      neo4jEncrypted: env['NEO4J_ENCRYPTED'] != 'false',
+      // PostgreSQL assignments
+      postgresHost: env['POSTGRES_HOST'] ?? 'localhost',
+      postgresPort: int.tryParse(env['POSTGRES_PORT'] ?? '5432') ?? 5432,
+      postgresDatabase: env['POSTGRES_DB'] ?? 'thai_herbal_db',
+      postgresUsername: env['POSTGRES_USER'] ?? 'postgres',
+      postgresPassword: env['POSTGRES_PASSWORD'] ?? 'postgres',
+      postgresUseSsl: env['POSTGRES_USE_SSL'] == 'true',
+      postgresTimeout: int.tryParse(env['POSTGRES_TIMEOUT'] ?? '30') ?? 30,
+      postgresQueryTimeout: int.tryParse(env['POSTGRES_QUERY_TIMEOUT'] ?? '15') ?? 15,
+      postgresPoolSize: int.tryParse(env['POSTGRES_POOL_SIZE'] ?? '10') ?? 10,
     );
   }
 
@@ -91,7 +137,25 @@ EnvConfig {
   mailerUser: $mailerUser,
   mailerPass: ${mailerPass.isEmpty ? '<empty>' : '*****'},
   enableVideoProcessing: $enableVideoProcessing,
-  isProduction: $isProduction
+  isProduction: $isProduction,
+  // PostgreSQL
+  postgresHost: $postgresHost,
+  postgresPort: $postgresPort,
+  postgresDatabase: $postgresDatabase,
+  postgresUsername: $postgresUsername,
+  postgresPassword: ${postgresPassword.isEmpty ? '<empty>' : '*****'},
+  postgresUseSsl: $postgresUseSsl,
+  postgresTimeout: $postgresTimeout,
+  postgresQueryTimeout: $postgresQueryTimeout,
+  postgresPoolSize: $postgresPoolSize,
+  // Neo4j
+  neo4jUri: $neo4jUri,
+  neo4jUsername: $neo4jUsername,
+  neo4jPassword: ${neo4jPassword.isEmpty ? '<empty>' : '*****'},
+  neo4jDatabase: $neo4jDatabase,
+  neo4jPoolSize: $neo4jPoolSize,
+  neo4jTimeout: $neo4jTimeout,
+  neo4jEncrypted: $neo4jEncrypted
 }
 ''';
   }
@@ -152,6 +216,30 @@ class EnvConfigManager {
       errors.add('STORAGE_PATH must be set');
     }
 
+    // PostgreSQL validations
+    if (_config.postgresHost.isEmpty) {
+      errors.add('POSTGRES_HOST must be set');
+    }
+    if (_config.postgresPort <= 0 || _config.postgresPort > 65535) {
+      errors.add('POSTGRES_PORT must be between 1 and 65535');
+    }
+    if (_config.postgresDatabase.isEmpty) {
+      errors.add('POSTGRES_DB must be set');
+    }
+    if (_config.postgresUsername.isEmpty) {
+      errors.add('POSTGRES_USER must be set');
+    }
+
+    // Neo4j validations
+    if (_config.neo4jUri.isEmpty || 
+        !(_config.neo4jUri.startsWith('neo4j://') || 
+          _config.neo4jUri.startsWith('bolt://'))) {
+      errors.add('NEO4J_URI must be a valid Neo4j connection URI (starts with neo4j:// or bolt://)');
+    }
+    if (_config.neo4jUsername.isEmpty) {
+      errors.add('NEO4J_USER must be set');
+    }
+
     if (errors.isNotEmpty) {
       throw ConfigValidationException(
         'Configuration validation failed',
@@ -205,6 +293,22 @@ class EnvConfigManager {
       'mailerUser': config.mailerUser,
       'enableVideoProcessing': config.enableVideoProcessing,
       'isProduction': config.isProduction,
+      // PostgreSQL
+      'postgresHost': config.postgresHost,
+      'postgresPort': config.postgresPort,
+      'postgresDatabase': config.postgresDatabase,
+      'postgresUsername': config.postgresUsername,
+      'postgresUseSsl': config.postgresUseSsl,
+      'postgresTimeout': config.postgresTimeout,
+      'postgresQueryTimeout': config.postgresQueryTimeout,
+      'postgresPoolSize': config.postgresPoolSize,
+      // Neo4j
+      'neo4jUri': config.neo4jUri,
+      'neo4jUsername': config.neo4jUsername,
+      'neo4jDatabase': config.neo4jDatabase,
+      'neo4jPoolSize': config.neo4jPoolSize,
+      'neo4jTimeout': config.neo4jTimeout,
+      'neo4jEncrypted': config.neo4jEncrypted,
     };
   }
 
@@ -229,30 +333,4 @@ class ConfigValidationException implements Exception {
   
   @override
   String toString() => 'ConfigValidationException: $message\nErrors:\n${errors.join('\n')}';
-}
-  
-    // Neo4j parameters
-    required this.neo4jUri,
-    required this.neo4jUsername,
-    required this.neo4jPassword,
-    this.neo4jDatabase = 'neo4j',
-    this.neo4jPoolSize = 10,
-    this.neo4jTimeout = 30,
-    this.neo4jEncrypted = true,
-  });
-
-  factory EnvConfig.fromEnv(DotEnv env) {
-    return EnvConfig._(
-      // ... existing assignments ...
-
-      // Neo4j assignments
-      neo4jUri: env['NEO4J_URI'] ?? 'neo4j://localhost:7687',
-      neo4jUsername: env['NEO4J_USER'] ?? 'neo4j',
-      neo4jPassword: env['NEO4J_PASSWORD'] ?? 'password',
-      neo4jDatabase: env['NEO4J_DATABASE'] ?? 'neo4j',
-      neo4jPoolSize: int.tryParse(env['NEO4J_POOL_SIZE'] ?? '10') ?? 10,
-      neo4jTimeout: int.tryParse(env['NEO4J_TIMEOUT'] ?? '30') ?? 30,
-      neo4jEncrypted: env['NEO4J_ENCRYPTED'] != 'false',
-    );
-  }
 }
