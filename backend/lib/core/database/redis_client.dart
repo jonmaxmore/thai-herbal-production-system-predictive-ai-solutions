@@ -11,57 +11,45 @@ class RedisClient {
     _command = conn.connect(config.redisHost, config.redisPort);
   }
 
-  Future<void> _sendCommand(List<Object> command) async {
-    await _command.send_object(command);
-  }
-
-  Future<Object?> _sendCommandWithReply(List<Object> command) async {
-    return await _command.send_object(command);
-  }
-
   Future<void> cacheCertification(CertificationApplication app) async {
-    await _sendCommand([
+    await _command.send_object([
       'HSET',
       'cert:${app.id}',
-      'status', app.status.toString(),
-      'farmerId', app.farmerId,
+      'status', app.status.name,
       'lastUpdated', DateTime.now().toIso8601String(),
     ]);
-    await _sendCommand(['EXPIRE', 'cert:${app.id}', _cacheTtl.toString()]);
+    await _command.send_object(['EXPIRE', 'cert:${app.id}', _cacheTtl.toString()]);
   }
 
   Future<CertificationStatus?> getCertificationStatus(String id) async {
-    final status = await _sendCommandWithReply(['HGET', 'cert:$id', 'status']);
+    final status = await _command.send_object(['HGET', 'cert:$id', 'status']);
     if (status == null) return null;
     
-    return CertificationStatus.values.firstWhere(
-      (e) => e.toString() == status,
-      orElse: () => CertificationStatus.unknown,
-    );
+    try {
+      return CertificationStatus.values.firstWhere(
+        (e) => e.name == status.toString(),
+      );
+    } catch (_) {
+      return CertificationStatus.unknown;
+    }
   }
 
   Future<void> enqueueAiProcessing(String certificationId) async {
-    await _sendCommand(['LPUSH', 'ai-processing', certificationId]);
-  }
-
-  Future<String?> dequeueAiProcessing() async {
-    return await _sendCommandWithReply(['RPOP', 'ai-processing']) as String?;
-  }
-
-  Future<void> cacheAiResult(String certificationId, String result) async {
-    await _sendCommand([
-      'SETEX', 
-      'ai-result:$certificationId', 
-      (_cacheTtl ~/ 2).toString(), // ครึ่งเวลาของ cache หลัก
-      result
-    ]);
+    await _command.send_object(['LPUSH', 'ai-processing', certificationId]);
   }
 
   Future<String?> getAiResult(String certificationId) async {
-    return await _sendCommandWithReply(['GET', 'ai-result:$certificationId']) as String?;
+    return await _command.send_object(['GET', 'ai-result:$certificationId']) as String?;
   }
 
-  Future<void> close() async {
-    await _command.get_connection().close();
+  Future<void> cacheVerificationHash(String qrCode, String hash) async {
+    await _command.send_object([
+      'HSET',
+      'verification:hashes',
+      qrCode,
+      hash,
+    ]);
   }
+
+  Future<void> close() async => await _command.get_connection().close();
 }
