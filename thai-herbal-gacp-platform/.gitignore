@@ -1,0 +1,46 @@
+# Security - NEVER commit these
+.security/
+.env*
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+private/
+secrets/
+credentials/
+
+# Compiled & Build
+dist/
+build/
+*.pyc
+__pycache__/
+node_modules/
+target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs with sensitive data
+*.log
+logs/
+audit/
+
+# AI Models (use Git LFS instead)
+*.h5
+*.pt
+*.onnx
+*.pb
+models/trained/*
+
+# Database
+*.db
+*.sqlite
+data/
+backups/
