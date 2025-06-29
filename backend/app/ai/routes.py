@@ -1,3 +1,4 @@
+# backend/app/ai/routes.py (Python Flask)
 @ai_bp.route('/analyze', methods=['POST'])
 def analyze_image():
     image = request.files['image'].read()
