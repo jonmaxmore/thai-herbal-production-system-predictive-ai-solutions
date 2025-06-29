@@ -1,102 +1,75 @@
 import 'package:neo4j_dart/neo4j_dart.dart';
 import 'package:backend/core/config/env_config.dart';
-import 'package:backend/features/certification/domain/entities/certification_application.dart';
+import 'package:backend/core/errors/exceptions.dart';
+import 'package:backend/core/utils/logger.dart';
 
 class Neo4jRepository {
   late final Driver _driver;
+  final EnvConfig _config;
+  final Logger _logger;
 
-  Neo4jRepository(EnvConfig config) {
-    _driver = Driver(
-      Uri.parse(config.neo4jUri),
-      AuthToken.basic(config.neo4jUsername, config.neo4jPassword),
-    );
-  }
+  Neo4jRepository(this._config, this._logger);
 
-  Future<void> createCertificationTrace(CertificationApplication app) async {
-    final session = _driver.session();
+  Future<void> initialize() async {
     try {
-      await session.writeTransaction((tx) async {
-        await tx.run('''
-          MERGE (farmer:Farmer {id: $farmerId, name: $farmerName})
-          CREATE (cert:Certification {
-            id: $certificationId,
-            createdAt: datetime(),
-            status: $status,
-            standard: "GACP"
-          })
-          CREATE (farmer)-[:HAS_CERTIFICATION]->(cert)
-          
-          WITH cert
-          UNWIND $herbIds AS herbId
-          MERGE (herb:Herb {id: herbId})
-          CREATE (cert)-[:CERTIFIES]->(herb)
-        ''', {
-          'farmerId': app.farmerId,
-          'farmerName': app.farmerName,
-          'certificationId': app.id,
-          'status': app.status.name,
-          'herbIds': app.herbIds,
-        });
-      });
-    } finally {
+      _driver = Driver(
+        Uri.parse(_config.neo4jUri),
+        AuthToken.basic(_config.neo4jUsername, _config.neo4jPassword),
+      );
+      
+      // Test connection
+      final session = _driver.session();
+      await session.run('RETURN 1');
       await session.close();
+    } catch (e) {
+      throw DatabaseConnectionException(
+        'Failed to connect to Neo4j: ${e.toString()}'
+      );
     }
   }
 
-  Future<void> addCertificationEvent({
-    required String certificationId,
-    required String eventType,
-    required String description,
-    required String actor,
+  Future<Session> getSession() {
+    return _driver.session();
+  }
+
+  Future<List<Record>> executeRead(
+    String query, {
+    Map<String, dynamic> parameters = const {},
+    Duration? timeout,
   }) async {
-    final session = _driver.session();
+    final session = getSession();
+    try {
+      return await session.readTransaction((tx) async {
+        final result = await tx.run(query, parameters: parameters);
+        return result.records;
+      });
+    } catch (e) {
+      _logger.error('Neo4j read query failed: $query', error: e);
+      throw DatabaseQueryException('Neo4j query failed: ${e.toString()}');
+    } finally {
+      await session.close();
+    }
+  }
+
+  Future<void> executeWrite(
+    String query, {
+    Map<String, dynamic> parameters = const {},
+    Duration? timeout,
+  }) async {
+    final session = getSession();
     try {
       await session.writeTransaction((tx) async {
-        await tx.run('''
-          MATCH (cert:Certification {id: $certificationId})
-          CREATE (event:Event {
-            timestamp: datetime(),
-            type: $eventType,
-            description: $description,
-            actor: $actor
-          })
-          CREATE (cert)-[:HAS_EVENT]->(event)
-        ''', {
-          'certificationId': certificationId,
-          'eventType': eventType,
-          'description': description,
-          'actor': actor,
-        });
+        await tx.run(query, parameters: parameters);
       });
+    } catch (e) {
+      _logger.error('Neo4j write query failed: $query', error: e);
+      throw DatabaseQueryException('Neo4j write failed: ${e.toString()}');
     } finally {
       await session.close();
     }
   }
 
-  Future<List<Map<String, dynamic>>> getCertificationTimeline(String certificationId) async {
-    final session = _driver.session();
-    try {
-      final result = await session.readTransaction((tx) async {
-        return await tx.run('''
-          MATCH (cert:Certification {id: $certificationId})-[:HAS_EVENT]->(event:Event)
-          RETURN event
-          ORDER BY event.timestamp DESC
-        ''', {'certificationId': certificationId});
-      });
-
-      return result.records.map((record) {
-        final event = record['event'];
-        return {
-          'timestamp': event['timestamp'],
-          'type': event['type'],
-          'description': event['description'],
-          'actor': event['actor'],
-        };
-      }).toList();
-    } finally {
-      await session.close();
-    }
+  Future<void> close() async {
+    await _driver.close();
   }
-
-  Future<void> close() async => await _driver.close();
 }
