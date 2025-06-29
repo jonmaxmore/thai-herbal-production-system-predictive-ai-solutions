@@ -10,7 +10,3 @@ class DatabaseFailure extends Failure {
 class NotFoundFailure extends Failure {
   NotFoundFailure(super.message);
 }
-
-class ValidationFailure extends Failure {
-  ValidationFailure(super.message);
-}
